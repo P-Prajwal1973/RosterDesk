@@ -1,75 +1,44 @@
-# React + TypeScript + Vite
+# RosterDesk
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+RosterDesk is a small hospital shift-roster tool for nurse managers. It supports weekly staffing, shift assignment, swap requests, safety review, and publishing.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Checks:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run lint
 ```
+
+## Included workflows
+
+- Roster board with ward, week, role, and staff-search filters stored in URL search parameters.
+- Shift drawer using React Hook Form and Zod.
+- Domain validation for duplicate shifts, rest time, weekly hours, ICU certification, leave, night streaks, and coverage.
+- Swap request approval and rejection.
+- Publish review with error blocking and warning acknowledgement.
+- Development controls for offline/write failure simulation.
+- Fake API with 15 seeded nurses across three wards, latency, abortable search, write failures, version conflicts, and idempotent writes.
+
+## Architecture
+
+- `src/feature/domain`: pure entities, rules, and use-case orchestration.
+- `src/core/handlers.ts`: in-memory API and seed data.
+- `src/App.tsx`: presentation workflow and TanStack Query integration.
+- `src/main.tsx`: React Router data-router and Query providers.
+
+The domain layer does not depend on React or the API. The UI reads server state through TanStack Query and keeps view filters in the URL.
+
+## Trade-offs and next steps
+
+This is intentionally a compact assignment implementation. The remaining production-hardening work would be extracting feature-level presentation/data modules, adding a dedicated conflict dialog, bulk swap actions, BroadcastChannel multi-tab refresh, route-level lazy loading, and component/integration tests.
+
+AI assistance was used for implementation and review; all generated code was checked with TypeScript, ESLint, Vitest, and the production build.

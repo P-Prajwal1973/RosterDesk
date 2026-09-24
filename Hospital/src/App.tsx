@@ -1,122 +1,64 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { approveSwap, getRoster, getStaff, getSwaps, getWards, publishRoster, rejectSwap, requirementsByWard, updateRosterCell, type SwapRequest } from './core/handlers';
+import { getViolationKey, validateRosterUseCase } from './feature/domain/usecase';
+import type { RosterCell, ShiftType } from './feature/domain/entites';
+import './App.css';
 
-function App() {
-  const [count, setCount] = useState(0)
+const shiftSchema = z.object({ shift: z.enum(['', 'D', 'E', 'N', 'LEAVE']) });
+type ShiftForm = z.infer<typeof shiftSchema>;
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+export default function App() {
+	const [devOpen, setDevOpen] = useState(false);
+	const [offline, setOffline] = useState(false);
+	const [params, setParams] = useSearchParams();
+	const ward = params.get('ward') ?? 'ICU';
+	const week = params.get('week') ?? '2026-W40';
+	const search = params.get('search') ?? '';
+	const role = params.get('role') ?? 'ALL';
+	const view = (params.get('view') as 'roster' | 'swaps' | 'publish' | null) ?? 'roster';
+	const setView = (nextView: 'roster' | 'swaps' | 'publish') => { const next = new URLSearchParams(params); next.set('view', nextView); setParams(next); };
+	const setFilter = (key: string, value: string) => { const next = new URLSearchParams(params); if (value && value !== 'ALL') next.set(key, value); else next.delete(key); setParams(next); };
+	const wards = useQuery({ queryKey: ['wards'], queryFn: ({ signal }) => getWards(signal) });
+	const roster = useQuery({ queryKey: ['roster', ward, week], queryFn: ({ signal }) => getRoster(ward, week, signal) });
+	const staff = useQuery({ queryKey: ['staff', ward, search], queryFn: ({ signal }) => getStaff(ward, search, signal), enabled: search.length === 0 || search.trim().length >= 2 });
+	const swaps = useQuery({ queryKey: ['swaps'], queryFn: ({ signal }) => getSwaps(signal), enabled: view === 'swaps' });
+	const [selected, setSelected] = useState<RosterCell | null>(null);
+	const [notice, setNotice] = useState('');
+	const shownStaff = useMemo(() => (staff.data ?? []).filter((person) => role === 'ALL' || person.grade === role), [staff.data, role]);
+	const dates = roster.data ? [...new Set(roster.data.cells.map((cell) => cell.date))].sort() : [];
+	const result = roster.data ? validateRosterUseCase({ roster: roster.data, staff: staff.data ?? [], requirements: requirementsByWard[ward] }) : null;
+	const save = useMutation({ mutationFn: ({ cell, shift }: { cell: RosterCell; shift: ShiftType | null }) => updateRosterCell(cell.cellId, shift, cell.version, offline), onSuccess: () => { void roster.refetch(); setSelected(null); setNotice('Assignment saved'); }, onError: (error) => setNotice(error instanceof Error ? error.message : 'Save failed') });
+	const publish = useMutation({ mutationFn: () => publishRoster(ward, week, `publish-${ward}-${week}`), onSuccess: () => { void roster.refetch(); setNotice('Roster published'); } });
+	useEffect(() => { if (!notice) return; const id = window.setTimeout(() => setNotice(''), 3500); return () => window.clearTimeout(id); }, [notice]);
+	const title = view === 'roster' ? 'Weekly roster' : view === 'swaps' ? 'Swap requests' : 'Publish week';
+	return <div className="app-shell"><header className="topbar"><Link className="brand" to="/"><b>R</b><span>RosterDesk</span></Link><nav>{(['roster', 'swaps', 'publish'] as const).map((item) => <button className={view === item ? 'active' : ''} key={item} onClick={() => setView(item)}>{item === 'roster' ? 'Roster board' : item === 'swaps' ? 'Swap requests' : 'Publish week'}</button>)}</nav><div className="top-actions"><span className={`connection ${offline ? 'offline' : ''}`}>{offline ? 'Offline' : 'Connected'}</span><button onClick={() => setDevOpen((open) => !open)}>Dev panel</button></div></header>{devOpen && <aside className="dev-panel"><strong>Development controls</strong><label><input type="checkbox" checked={offline} onChange={(event) => setOffline(event.target.checked)} /> Fail next write / simulate offline</label><label><input type="checkbox" /> Another manager edits a random cell</label></aside>}<main className="content"><div className="page-head"><div><p className="eyebrow">Clinical operations / {week}</p><h1>{title}</h1><p>Plan safe staffing for {wards.data?.find((item) => item.code === ward)?.name ?? ward}.</p></div>{view === 'roster' && <button className="primary" onClick={() => setView('publish')}>Review & publish</button>}</div>{view === 'roster' && <><div className="filters"><label>Ward<select value={ward} onChange={(event) => setFilter('ward', event.target.value)}>{(wards.data ?? []).map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label><label>Week<input value={week} onChange={(event) => setFilter('week', event.target.value)} /></label><label>Role<select value={role} onChange={(event) => setFilter('role', event.target.value)}><option value="ALL">All roles</option><option value="SENIOR">Senior</option><option value="JUNIOR">Junior</option></select></label><label className="wide">Search staff<input value={search} onChange={(event) => setFilter('search', event.target.value)} placeholder="Type 2+ characters" /></label></div><div className="status-bar"><span>{roster.data?.published ? 'Published and read-only' : 'Draft roster'}</span><strong className={result?.errors.length ? 'bad' : 'good'}>{result?.errors.length ?? 0} errors · {result?.warnings.length ?? 0} warnings</strong></div>{roster.data ? <RosterGrid dates={dates} staff={shownStaff} roster={roster.data} onSelect={setSelected} /> : <div className="grid-card">Loading roster...</div>}{selected && roster.data && <ShiftDrawer cell={selected} onClose={() => setSelected(null)} onSave={(shift) => save.mutate({ cell: selected, shift })} saving={save.isPending} />}</>}{view === 'swaps' && <Swaps data={swaps.data ?? []} onNotice={setNotice} />}{view === 'publish' && roster.data && <Publish roster={roster.data} staff={staff.data ?? []} ward={ward} onPublish={() => publish.mutate()} publishing={publish.isPending} />}</main>{notice && <div className="toast" role="status">{notice}</div>}<footer>RosterDesk <span>Safety-first roster planning</span></footer></div>;
 }
 
-export default App
+function RosterGrid({ dates, staff, roster, onSelect }: { dates: string[]; staff: Array<{ id: string; fullName: string; grade: string }>; roster: { cells: RosterCell[]; published: boolean }; onSelect: (cell: RosterCell) => void }) {
+	return <div className="grid-card"><table><thead><tr><th className="name-col">Care team</th>{dates.map((date) => <th key={date}>{day(date)}<small>{date.slice(5)}</small></th>)}</tr></thead><tbody>{staff.filter((person) => roster?.cells.some((cell) => cell.staffId === person.id)).slice(0, 36).map((person) => <tr key={person.id}><th className="person"><span className="avatar">{person.fullName.split(' ').map((part) => part[0]).join('')}</span><span>{person.fullName}<small>{person.grade === 'SENIOR' ? 'Senior' : 'Staff nurse'}</small></span></th>{dates.map((date) => { const cell = roster?.cells.find((item) => item.staffId === person.id && item.date === date); return <td key={date}>{cell && <button disabled={roster.published} className={`shift ${cell.shift?.toLowerCase() ?? 'empty'}`} onClick={() => onSelect(cell)}>{cell.shift === 'LEAVE' ? 'Leave' : cell.shift ?? '+'}</button>}</td>; })}</tr>)}<tr className="coverage"><th>Coverage <small>staffed / required</small></th>{dates.map((date) => <td key={date}>D {roster?.cells.filter((cell) => cell.date === date && cell.shift === 'D').length} / 4<br />E {roster?.cells.filter((cell) => cell.date === date && cell.shift === 'E').length} / 3<br />N {roster?.cells.filter((cell) => cell.date === date && cell.shift === 'N').length} / 2</td>)}</tr></tbody></table></div>;
+}
+
+function ShiftDrawer({ cell, onClose, onSave, saving }: { cell: RosterCell; onClose: () => void; onSave: (shift: ShiftType | null) => void; saving: boolean }) {
+	const form = useForm<ShiftForm>({ resolver: zodResolver(shiftSchema), defaultValues: { shift: cell.shift ?? '' } });
+	return <div className="backdrop" onMouseDown={onClose}><aside className="drawer" onMouseDown={(event) => event.stopPropagation()}><button className="close" onClick={onClose}>×</button><p className="eyebrow">Shift drawer</p><h2>{cell.date}</h2><p>Assign or change this cell. Rule violations are reviewed before publishing.</p><form onSubmit={form.handleSubmit((values) => onSave(values.shift ? values.shift as ShiftType : null))}><label>Shift<select {...form.register('shift')}><option value="">Unassigned</option><option value="D">Day · 07:00–15:00</option><option value="E">Evening · 15:00–23:00</option><option value="N">Night · 23:00–07:00</option><option value="LEAVE">Leave</option></select></label>{form.formState.errors.shift && <small className="bad">Choose a shift</small>}<div className="drawer-note"><strong>Rule review</strong><span>{cell.shift === 'N' ? 'Night shift ends the next day.' : 'Changes are checked against rest, leave and coverage.'}</span></div><div className="drawer-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? 'Saving...' : 'Save assignment'}</button></div></form></aside></div>;
+}
+
+function Swaps({ data, onNotice }: { data: SwapRequest[]; onNotice: (message: string) => void }) {
+	const client = useQueryClient();
+	const approve = useMutation({ mutationFn: (swap: SwapRequest) => approveSwap(swap.id, `approve-${swap.id}`), onSuccess: () => { void client.invalidateQueries({ queryKey: ['swaps'] }); void client.invalidateQueries({ queryKey: ['roster'] }); onNotice('Swap approved and roster updated'); }, onError: (error) => onNotice(error instanceof Error ? error.message : 'Swap could not be approved') });
+	const reject = useMutation({ mutationFn: (id: string) => rejectSwap(id, 'Rejected by nurse manager after safety review'), onSuccess: () => { void client.invalidateQueries({ queryKey: ['swaps'] }); onNotice('Swap rejected'); } });
+	return <div className="table-card"><table><thead><tr><th>Request</th><th>Shift</th><th>Ward</th><th>Status</th><th /></tr></thead><tbody>{data.map((swap) => <tr key={swap.id}><td>{swap.fromStaffId} <span className="muted">to</span> {swap.toStaffId}</td><td>{day(swap.date)} · {swap.shift}</td><td>{swap.wardCode}</td><td><span className={`pill ${swap.status.toLowerCase()}`}>{swap.status}</span></td><td>{swap.status === 'PENDING' && <span className="actions"><button onClick={() => approve.mutate(swap)}>Approve</button><button onClick={() => reject.mutate(swap.id)}>Reject</button></span>}</td></tr>)}</tbody></table></div>;
+}
+
+function Publish({ roster, staff, ward, onPublish, publishing }: { roster: { published: boolean; version: number; cells: RosterCell[]; wardCode: string; isoWeek: string }; staff: never[] | Array<{ id: string; fullName: string; grade: 'SENIOR' | 'JUNIOR'; wardId: string; icuCertExpiry: string | null; leaveDates: string[] }>; ward: string; onPublish: () => void; publishing: boolean }) {
+	const [ack, setAck] = useState<string[]>([]);
+	const result = validateRosterUseCase({ roster, staff, requirements: requirementsByWard[ward], acknowledgedWarningKeys: ack });
+	return <div className="publish-layout"><section className="violations"><div className="review-title"><span className={result.errors.length ? 'review-bad' : 'review-good'}>{result.errors.length ? '!' : '✓'}</span><div><h2>{result.errors.length ? 'Attention required' : 'Ready to publish'}</h2><p>{result.errors.length} errors · {result.unacknowledgedWarnings.length} warnings need acknowledgement</p></div></div>{result.violations.map((item) => { const key = getViolationKey(item); return <div className={`violation ${item.severity.toLowerCase()}`} key={key}><strong>{item.ruleId}</strong><span>{item.message}</span>{item.severity === 'WARNING' && <label><input type="checkbox" checked={ack.includes(key)} onChange={() => setAck((current) => current.includes(key) ? current.filter((itemKey) => itemKey !== key) : [...current, key])} /> Acknowledge</label>}</div>; })}</section><aside className="publish-card"><p className="eyebrow">Release gate</p><h2>{roster.published ? 'Already published' : result.canPublish ? 'Publish this week' : 'Publishing blocked'}</h2><p>Published weeks are read-only for every manager.</p><button className="primary full" disabled={!result.canPublish || publishing} onClick={onPublish}>{publishing ? 'Publishing...' : 'Publish roster'}</button></aside></div>;
+}
+
+function day(date: string) { return new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(new Date(`${date}T12:00:00`)); }
